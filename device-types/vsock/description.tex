@@ -20,6 +20,7 @@ Ethernet or IP protocols.
 \item[VIRTIO_VSOCK_F_STREAM (0)] stream socket type is supported.
 \item[VIRTIO_VSOCK_F_SEQPACKET (1)] seqpacket socket type is supported.
 \item[VIRTIO_VSOCK_F_NO_IMPLIED_STREAM (2)] stream socket type is not implied.
+\item[VIRTIO_VSOCK_F_MULTI_DEVICES (3)] multiple socket devices are supported.
 \end{description}
 
 \drivernormative{\subsubsection}{Feature bits}{Device Types / Socket Device / Feature bits}
@@ -33,6 +34,13 @@ VIRTIO_VSOCK_F_STREAM has been negotiated.
 If VIRTIO_VSOCK_F_SEQPACKET has been negotiated, but not
 VIRTIO_VSOCK_F_NO_IMPLIED_STREAM, the driver MAY act as if
 VIRTIO_VSOCK_F_STREAM has also been negotiated.
+
+If a device without VIRTIO_VSOCK_F_MULTI_DEVICES has been registered, the
+driver SHOULD ignore all subsequent devices.
+
+If a device with VIRTIO_VSOCK_F_MULTI_DEVICES has been registered, the
+driver SHOULD accept other devices only if they expose
+VIRTIO_VSOCK_F_MULTI_DEVICES.
 
 \devicenormative{\subsubsection}{Feature bits}{Device Types / Socket Device / Feature bits}
 
@@ -52,6 +60,7 @@ Socket device configuration uses the following layout structure:
 \begin{lstlisting}
 struct virtio_vsock_config {
 	le64 guest_cid;
+	le16 index;
 };
 \end{lstlisting}
 
@@ -77,10 +86,35 @@ CID    & Notes \\
 \hline
 \end{tabular}
 
+The \field{index} field indicates index of a device, and is required for
+each device when VIRTIO_VSOCK_F_MULTI_DEVICES feature has been negotiated.
+The \field{index} is 16 bits in size, enabling support for up to 65,536
+devices.
+
+The source socket is allowed to not be bound to any CID. It is required for
+the driver to choose a CID for the socket. If VIRTIO_VSOCK_F_MULTI_DEVICES
+is not negotiated, the one and only device's CID is used. If
+VIRTIO_VSOCK_F_MULTI_DEVICES is negotiated, the driver uses the default
+device's. In this case, the driver selects the device with the lowest index
+as the default.
+
+\devicenormative{\subsubsection}{Device configuration layout}{Device Types / Socket Device / Device configuration layout}
+
+When VIRTIO_VSOCK_F_MULTI_DEVICES is negotiated, the device MUST offer an
+\field{index}, which MUST NOT be same with the \field{index} of other
+devices.
+
+When VIRTIO_VSOCK_F_MULTI_DEVICES is not negotiated, the device SHOULD NOT
+offer an \field{index}.
+
 \subsection{Device Initialization}\label{sec:Device Types / Socket Device / Device Initialization}
 
 \begin{enumerate}
 \item The guest's cid is read from \field{guest_cid}.
+
+\item If VIRTIO_VSOCK_F_MULTI_DEVICES has been negotiated, the device's
+index will be read from \field{index}. If not, the device's index will
+be ignored.
 
 \item Buffers are added to the event virtqueue to receive events from the device.
 
@@ -167,6 +201,10 @@ Flows are identified by a (source, destination) address tuple.  An address
 consists of a (cid, port number) tuple. The header fields used for this are
 \field{src_cid}, \field{src_port}, \field{dst_cid}, and \field{dst_port}.
 
+If at least one device has negotiated VIRTIO_VSOCK_F_MULTI_DEVICES, and the
+source socket is not bound to any CID, then \field{src_cid} should be set
+to the default device's CID.
+
 Currently stream and seqpacket sockets are supported. \field{type} is 1 (VIRTIO_VSOCK_TYPE_STREAM)
 for stream socket types, and 2 (VIRTIO_VSOCK_TYPE_SEQPACKET) for seqpacket socket types.
 
@@ -233,8 +271,12 @@ incoming packets are write-only.
 
 \drivernormative{\paragraph}{Device Operation: Receive and Transmit}{Device Types / Socket Device / Device Operation / Receive and Transmit}
 
-The \field{guest_cid} configuration field MUST be used as the source CID when
-sending outgoing packets.
+The \field{guest_cid} configuration field MUST be used as the source CID
+when sending outgoing packets.
+
+When VIRTIO_VSOCK_F_MULTI_DEVICES is negotiated, the source CID MUST be one
+of the \field{guest_cid} configuration field of the multiple devices
+handled by the driver.
 
 A VIRTIO_VSOCK_OP_RST reply MUST be sent if a packet is received with an
 unknown \field{type} value.
