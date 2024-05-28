@@ -20,6 +20,7 @@ Ethernet or IP protocols.
 \item[VIRTIO_VSOCK_F_STREAM (0)] stream socket type is supported.
 \item[VIRTIO_VSOCK_F_SEQPACKET (1)] seqpacket socket type is supported.
 \item[VIRTIO_VSOCK_F_NO_IMPLIED_STREAM (2)] stream socket type is not implied.
+\item[VIRTIO_VSOCK_F_MULTI_DEVICES (3)] multiple devices feature is supported.
 \end{description}
 
 \drivernormative{\subsubsection}{Feature bits}{Device Types / Socket Device / Feature bits}
@@ -33,6 +34,12 @@ VIRTIO_VSOCK_F_STREAM has been negotiated.
 If VIRTIO_VSOCK_F_SEQPACKET has been negotiated, but not
 VIRTIO_VSOCK_F_NO_IMPLIED_STREAM, the driver MAY act as if
 VIRTIO_VSOCK_F_STREAM has also been negotiated.
+
+The driver SHOULD ignore devices that do not have
+VIRTIO_VSOCK_F_MULTI_DEVICES if the feature has been negotiated.
+
+The driver SHOULD ignore all subsequent devices if a device without
+VIRTIO_VSOCK_F_MULTI_DEVICES is present.
 
 \devicenormative{\subsubsection}{Feature bits}{Device Types / Socket Device / Feature bits}
 
@@ -52,6 +59,7 @@ Socket device configuration uses the following layout structure:
 \begin{lstlisting}
 struct virtio_vsock_config {
 	le64 guest_cid;
+	le16 device_order;
 };
 \end{lstlisting}
 
@@ -77,10 +85,26 @@ CID    & Notes \\
 \hline
 \end{tabular}
 
+The \field{device_order} is used to identify the default device. Up to
+65,535 devices can be supported due to the size.
+
+\devicenormative{\subsubsection}{Device configuration layout}{Device Types / Socket Device / Device configuration layout}
+
+The device MUST provide a distinct \field{device_order} if
+VIRTIO_VSOCK_F_MULTI_DEVICES feature has been negotiated.
+
+\drivernormative{\subsubsection}{Device configuration layout}{Device Types / Socket Device / Device configuration layout}
+
+The driver MUST treat the device with the lowest \field{device_order} as
+the default device.
+
 \subsection{Device Initialization}\label{sec:Device Types / Socket Device / Device Initialization}
 
 \begin{enumerate}
 \item The guest's cid is read from \field{guest_cid}.
+
+\item If VIRTIO_VSOCK_F_MULTI_DEVICES has been negotiated, the device's
+order will be read from \field{device_order}.
 
 \item Buffers are added to the event virtqueue to receive events from the device.
 
@@ -233,8 +257,10 @@ incoming packets are write-only.
 
 \drivernormative{\paragraph}{Device Operation: Receive and Transmit}{Device Types / Socket Device / Device Operation / Receive and Transmit}
 
-The \field{guest_cid} configuration field MUST be used as the source CID when
-sending outgoing packets.
+If the source socket is not bound to any source CID, the driver MUST assign
+one. If more than one device is present, the driver SHOULD use the default
+device's \field{guest_cid} configuration. Otherwise, the driver SHOULD use
+the \field{guest_cid} of the only available device.
 
 A VIRTIO_VSOCK_OP_RST reply MUST be sent if a packet is received with an
 unknown \field{type} value.
